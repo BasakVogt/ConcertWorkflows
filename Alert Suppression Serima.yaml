@@ -1,0 +1,153 @@
+name: Alert Suppression Serima
+platform: node
+blocks:
+  - action: system/Common/String/StringIncludes
+    name: devicename_contains_edge
+    inputs:
+      - name: str
+        value: $devicename
+      - name: searchString
+        value: '"EDGE"'
+  - action: if
+    name: If_contains_edge
+    then:
+      - action: system/ServiceNow/createTable
+        name: ServiceNow_Create_Incident
+        inputs:
+          - name: authKey
+            value: $ServiceNowCredentials
+          - name: tableName
+            value: '"incident"'
+          - name: Table
+            value: |-
+              {
+                  "urgency": 1,
+                  "impact": 1,
+                  "short_description": "Internet router " + $devicename + " is down"
+              }
+          - name: content_type
+            value: '"application/json"'
+    else:
+      - action: system/Common/Sleep
+        name: wait_1_minute
+        inputs:
+          - name: seconds
+            value: "60"
+        skipped: true
+      - action: assign
+        name: Office_Router
+        variable: $officerouter
+        value: "$devicename.slice(0,3)+ \"-EDGE01\""
+      - action: system/SevOne/REST v3/Metadata/Metadata Devices (POST)
+        name: SevOne_Find_Router
+        inputs:
+          - name: authKey
+            value: $NMSCredentials
+          - name: body
+            value: |-
+              {
+                  "name": {
+                      "value": $officerouter
+                  }
+              }
+      - action: if
+        name: If_internet_router_found
+        then:
+          - action: system/SevOne/REST v3/Data/Data Last Data Point (POST)
+            name: SevOne_get_last_value
+            inputs:
+              - name: authKey
+                value: $NMSCredentials
+              - name: body
+                value: |-
+                  {
+                      "indicatorFilters": [
+                          {
+                              "plugins": ["ICMP"],
+                              "indicatorTypeNames": [
+                                  {
+                                      "value": "availability"
+                                  }
+                              ],
+                              "deviceIds": [ $SevOne_Find_Router.result.devices[0].id ]
+                          }
+                      ]
+                  }
+          - action: if
+            name: If_router_down
+            then: []
+            else:
+              - action: system/ServiceNow/createTable
+                name: ServiceNow_Create_Incident2
+                inputs:
+                  - name: authKey
+                    value: $ServiceNowCredentials
+                  - name: tableName
+                    value: '"incident"'
+                  - name: Table
+                    value: |-
+                      {
+                          "urgency": 2,
+                          "impact": 2,
+                          "short_description": "Device " + $devicename + " is down"
+                      }
+                  - name: content_type
+                    value: '"application/json"'
+            condition: "$SevOne_get_last_value.result.indicatorResults[0].dataPoint.value\
+              \ == 0"
+        else:
+          - action: system/ServiceNow/createTable
+            name: ServiceNow_Create_Incident3
+            inputs:
+              - name: authKey
+                value: $ServiceNowCredentials
+              - name: tableName
+                value: '"incident"'
+              - name: Table
+                value: |-
+                  {
+                      "urgency": 2,
+                      "impact": 2,
+                      "short_description": "Device " + $devicename + " is down"
+                  }
+              - name: content_type
+                value: '"application/json"'
+        condition: $SevOne_Find_Router.result.devices.length > 0
+    condition: $devicename_contains_edge.result
+variables:
+  - name: result
+    required: false
+    isInput: false
+    isOutput: true
+    level: INTERMEDIATE
+    type:
+      type: any
+    value: '""'
+  - name: NMSCredentials
+    required: true
+    isInput: true
+    isOutput: false
+    level: INTERMEDIATE
+    type:
+      type: string
+    value: '"admin/SevOne"'
+  - name: ServiceNowCredentials
+    required: true
+    isInput: true
+    isOutput: false
+    level: INTERMEDIATE
+    type:
+      type: string
+    value: '"admin/ServiceNow"'
+  - name: devicename
+    required: true
+    isInput: true
+    isOutput: false
+    level: INTERMEDIATE
+    type:
+      type: string
+    value: '" Hamburg Router is Down"'
+meta:
+  version: 5
+  layout: flow
+  workerGroup: default
